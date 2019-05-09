@@ -6,6 +6,7 @@ use nom::{
     multi::separated_list,
     sequence::pair,
     IResult,
+    ParseError,
 };
 
 use crate::model::{Charset, Data, Encoding, HeaderEntry, Ofx, Security};
@@ -71,6 +72,12 @@ fn header_security_value(i: &str) -> IResult<&str, Option<Security>> {
         map(none, |_| None),
         map(tag("TYPE1"), |_| Some(Security::Type1)),
     ))(i)
+}
+
+fn sgml_tag<O, F>(tag_name: F, i: &str) -> IResult<&str, O> where
+    F: Fn(I) -> IResult<&str, O>,
+{
+    unimplemented!()
 }
 
 fn none(i: &str) -> IResult<&str, &str> {

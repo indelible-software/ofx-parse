@@ -5,4 +5,4 @@ authors = ["Paul Hendry <paul@pshendry.com>"]
 edition = "2018"
 
 [dependencies]
-nom = "^5.0.0-alpha2"
+nom = "^5.0.0-beta1"
