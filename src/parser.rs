@@ -1,19 +1,11 @@
 use nom::{
-    IResult,
     branch::alt,
     bytes::complete::tag,
-    character::{
-        complete::{
-            alphanumeric1,
-            char,
-            digit1,
-            not_line_ending,
-            line_ending,
-        },
-    },
+    character::complete::{alphanumeric1, char, digit1, line_ending, not_line_ending},
     combinator::map,
     multi::separated_list,
     sequence::pair,
+    IResult,
 };
 
 use crate::model::{Charset, Data, Encoding, HeaderEntry, Ofx, Security};
@@ -27,8 +19,7 @@ fn v1_header(i: &str) -> IResult<&str, Vec<HeaderEntry>> {
 }
 
 fn v1_header_entry(i: &str) -> IResult<&str, HeaderEntry> {
-    pair(alphanumeric1, char(':'))(i)
-        .and_then(|(i2, (e, _))| header_value(e, i2))
+    pair(alphanumeric1, char(':'))(i).and_then(|(i2, (e, _))| header_value(e, i2))
 }
 
 fn header_value<'a>(element: &str, i: &'a str) -> IResult<&'a str, HeaderEntry> {
@@ -90,10 +81,6 @@ fn unsigned_integer(i: &str) -> IResult<&str, u32> {
     map(digit1, |v: &str| v.parse::<u32>().unwrap())(i)
 }
 
-fn end_of_line(i: &str) -> IResult<&str, &str> {
-    if i.is_empty() { Ok((i, i)) } else { line_ending(i) }
-}
-
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod tests {
@@ -101,32 +88,39 @@ mod tests {
 
     use super::*;
 
-    fn assert_consumed<'a, C: Fn(&'a str) -> IResult<&'a str, &'a str>>(combinator: C, input: &'a str) {
+    fn assert_consumed<'a, C: Fn(&'a str) -> IResult<&'a str, &'a str>>(
+        combinator: C,
+        input: &'a str,
+    ) {
         assert_eq!(combinator(input), Ok(("", input)));
     }
 
-    fn assert_not_consumed<'a, T: 'a, C: Fn(&'a str) -> IResult<&'a str, T>>(combinator: C, input: &'a str) {
+    fn assert_not_consumed<'a, T: 'a, C: Fn(&'a str) -> IResult<&'a str, T>>(
+        combinator: C,
+        input: &'a str,
+    ) {
         assert!(combinator(input).is_err())
     }
 
-    fn assert_consumed_eq<'a, T: 'a, C>(combinator: C, input: &'a str, expected: T) where
+    fn assert_consumed_eq<'a, T: 'a, C>(combinator: C, input: &'a str, expected: T)
+    where
         T: Debug + PartialEq,
-        C: Fn(&'a str) -> IResult<&'a str, T> {
+        C: Fn(&'a str) -> IResult<&'a str, T>,
+    {
         assert_eq!(combinator(input), Ok(("", expected)));
     }
 
     #[test]
     fn v1_header__basic_sample__match() {
-        const SAMPLE: &str = "\
-            OFXHEADER:100\n\
-            DATA:OFXSGML\n\
-            VERSION:102\n\
-            SECURITY:NONE\n\
-            ENCODING:USASCII\n\
-            CHARSET:1252\n\
-            COMPRESSION:NONE\n\
-            OLDFILEUID:NONE\n\
-            NEWFILEUID:NONE";
+        const SAMPLE: &str = "OFXHEADER:100\n\
+                              DATA:OFXSGML\n\
+                              VERSION:102\n\
+                              SECURITY:NONE\n\
+                              ENCODING:USASCII\n\
+                              CHARSET:1252\n\
+                              COMPRESSION:NONE\n\
+                              OLDFILEUID:NONE\n\
+                              NEWFILEUID:NONE";
         let expected: Vec<HeaderEntry> = vec![
             HeaderEntry::OfxHeader(100u32),
             HeaderEntry::Data(Data::OfxSgml),
@@ -144,12 +138,20 @@ mod tests {
 
     #[test]
     fn v1_header_entry__valid_charset__match() {
-        assert_consumed_eq(v1_header_entry, "CHARSET:1252", HeaderEntry::Charset(Some(Charset::Windows1252)));
+        assert_consumed_eq(
+            v1_header_entry,
+            "CHARSET:1252",
+            HeaderEntry::Charset(Some(Charset::Windows1252)),
+        );
     }
 
     #[test]
     fn v1_header_entry__unknown__match() {
-        assert_consumed_eq(v1_header_entry, "FOO:BAR", HeaderEntry::Unknown(String::from("BAR")));
+        assert_consumed_eq(
+            v1_header_entry,
+            "FOO:BAR",
+            HeaderEntry::Unknown(String::from("BAR")),
+        );
     }
 
     #[test]
@@ -159,12 +161,20 @@ mod tests {
 
     #[test]
     fn header_value__valid_charset__match() {
-        assert_consumed_eq(|i| header_value("CHARSET", i), "1252", HeaderEntry::Charset(Some(Charset::Windows1252)));
+        assert_consumed_eq(
+            |i| header_value("CHARSET", i),
+            "1252",
+            HeaderEntry::Charset(Some(Charset::Windows1252)),
+        );
     }
 
     #[test]
     fn header_value__unknown__match() {
-        assert_consumed_eq(|i| header_value("FOO", i), "BAR", HeaderEntry::Unknown(String::from("BAR")));
+        assert_consumed_eq(
+            |i| header_value("FOO", i),
+            "BAR",
+            HeaderEntry::Unknown(String::from("BAR")),
+        );
     }
 
     #[test]
@@ -255,25 +265,5 @@ mod tests {
     #[test]
     fn unsigned_integer__negative__no_match() {
         assert_not_consumed(unsigned_integer, "-123");
-    }
-
-    #[test]
-    fn end_of_line__empty__match() {
-        assert_eq!(end_of_line(""), Ok(("", "")));
-    }
-
-    #[test]
-    fn end_of_line__lf__match() {
-        assert_eq!(end_of_line("\nasdf"), Ok(("asdf", "\n")));
-    }
-
-    #[test]
-    fn end_of_line__crlf__match() {
-        assert_eq!(end_of_line("\r\nasdf"), Ok(("asdf", "\r\n")));
-    }
-
-    #[test]
-    fn end_of_line__mid_line__no_match() {
-        assert_not_consumed(end_of_line, "as\ndf");
     }
 }
