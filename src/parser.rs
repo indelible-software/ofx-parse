@@ -1,18 +1,25 @@
 use nom::{
     branch::alt,
-    bytes::complete::tag,
+    bytes::complete::{tag, take_while, take_while1},
     character::complete::{alphanumeric1, char, digit1, line_ending, not_line_ending},
     combinator::map,
-    multi::separated_list,
-    sequence::pair,
+    multi::{many0, separated_list},
+    sequence::{delimited, pair, preceded, terminated},
     IResult,
-    ParseError,
 };
 
 use crate::model::{Charset, Data, Encoding, HeaderEntry, Ofx, Security};
 
 pub fn ofx(i: &str) -> IResult<&str, Ofx> {
-    map(v1_header, |hs| Ofx { headers: hs })(i)
+    let (i, headers) = v1_header(i)?;
+    let (i, _) = sgml_element_exact("OFX")(i)?;
+    Ok((i, Ofx { headers }))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SgmlElement {
+    name: String,
+    children: Vec<SgmlElement>,
 }
 
 fn v1_header(i: &str) -> IResult<&str, Vec<HeaderEntry>> {
@@ -74,18 +81,79 @@ fn header_security_value(i: &str) -> IResult<&str, Option<Security>> {
     ))(i)
 }
 
-fn sgml_tag<O, F>(tag_name: F, i: &str) -> IResult<&str, O> where
-    F: Fn(I) -> IResult<&str, O>,
-{
-    unimplemented!()
+fn sgml_element(i: &str) -> IResult<&str, SgmlElement> {
+    whitespace(i)
+        .and_then(|(r, _)| sgml_open_tag(r))
+        .and_then(|(r, tag_name)| {
+            map(
+                terminated(many0(sgml_element), sgml_close_tag(tag_name)),
+                |children| SgmlElement {
+                    name: String::from(tag_name),
+                    children,
+                },
+            )(r)
+        })
+}
+
+#[allow(clippy::needless_lifetimes)]
+fn sgml_element_exact<'a>(name: &'a str) -> impl Fn(&'a str) -> IResult<&'a str, SgmlElement> {
+    move |i: &str| {
+        map(
+            delimited(
+                sgml_open_tag_exact(name),
+                many0(sgml_element),
+                sgml_close_tag(name),
+            ),
+            |children| SgmlElement {
+                name: String::from(name),
+                children,
+            },
+        )(i)
+    }
+}
+
+fn sgml_open_tag(i: &str) -> IResult<&str, &str> {
+    preceded(
+        whitespace,
+        delimited(char('<'), take_while1(is_uppercase), char('>')),
+    )(i)
+}
+
+#[allow(clippy::needless_lifetimes)]
+fn sgml_open_tag_exact<'a>(name: &'a str) -> impl Fn(&'a str) -> IResult<&'a str, ()> {
+    move |i: &str| {
+        preceded(whitespace, delimited(char('<'), tag(name), char('>')))(i).map(|(r, _)| (r, ()))
+    }
+}
+
+#[allow(clippy::needless_lifetimes)]
+fn sgml_close_tag<'a>(tag_name: &'a str) -> impl Fn(&'a str) -> IResult<&'a str, ()> {
+    move |i: &str| {
+        preceded(whitespace, delimited(tag("</"), tag(tag_name), char('>')))(i)
+            .map(|(r, _)| (r, ()))
+    }
 }
 
 fn none(i: &str) -> IResult<&str, &str> {
     tag("NONE")(i)
 }
 
+fn whitespace(i: &str) -> IResult<&str, &str> {
+    take_while(is_whitespace)(i)
+}
+
 fn unsigned_integer(i: &str) -> IResult<&str, u32> {
     map(digit1, |v: &str| v.parse::<u32>().unwrap())(i)
+}
+
+fn is_uppercase(chr: char) -> bool {
+    let chr = chr as u8;
+    chr >= 0x41 && chr <= 0x5A
+}
+
+fn is_whitespace(chr: char) -> bool {
+    let chr = chr as u8;
+    chr == 0x09 || chr == 0x0A || chr == 0x0D || chr == 0x20
 }
 
 #[cfg(test)]
@@ -250,6 +318,110 @@ mod tests {
     }
 
     #[test]
+    fn sgml_element__empty_element__match() {
+        let expected = SgmlElement {
+            name: String::from("FOO"),
+            children: vec![],
+        };
+        assert_consumed_eq(sgml_element, "<FOO></FOO>", expected);
+    }
+
+    #[test]
+    fn sgml_element__element_with_whitespace__match() {
+        let expected = SgmlElement {
+            name: String::from("FOO"),
+            children: vec![],
+        };
+        assert_consumed_eq(sgml_element, "  <FOO> </FOO>", expected);
+    }
+
+    #[test]
+    fn sgml_element__nested_element__match() {
+        let expected = SgmlElement {
+            name: String::from("FOO"),
+            children: vec![SgmlElement {
+                name: String::from("BAR"),
+                children: vec![],
+            }],
+        };
+        assert_consumed_eq(sgml_element, "<FOO> <BAR> </BAR></FOO>", expected);
+    }
+
+    #[test]
+    fn sgml_element_exact__empty_element__match() {
+        let expected = SgmlElement {
+            name: String::from("FOO"),
+            children: vec![],
+        };
+        assert_consumed_eq(sgml_element_exact("FOO"), "<FOO></FOO>", expected);
+    }
+
+    #[test]
+    fn sgml_element_exact__nonmatching_element__no_match() {
+        assert_not_consumed(sgml_element_exact("FOO"), "<BAR></BAR>");
+    }
+
+    #[test]
+    fn sgml_element_exact__element_with_whitespace__match() {
+        let expected = SgmlElement {
+            name: String::from("FOO"),
+            children: vec![],
+        };
+        assert_consumed_eq(sgml_element_exact("FOO"), "  <FOO> </FOO>", expected);
+    }
+
+    #[test]
+    fn sgml_element_exact__nested_element__match() {
+        let expected = SgmlElement {
+            name: String::from("FOO"),
+            children: vec![SgmlElement {
+                name: String::from("BAR"),
+                children: vec![],
+            }],
+        };
+        assert_consumed_eq(
+            sgml_element_exact("FOO"),
+            "<FOO> <BAR> </BAR></FOO>",
+            expected,
+        );
+    }
+
+    #[test]
+    fn sgml_open_tag__valid_tag__match() {
+        assert_consumed_eq(sgml_open_tag, "<FOO>", "FOO");
+    }
+
+    #[test]
+    fn sgml_open_tag__lowercase_tag__no_match() {
+        assert_not_consumed(sgml_open_tag, "<foo>");
+    }
+
+    #[test]
+    fn sgml_open_tag_exact__valid_tag__match() {
+        assert_consumed_eq(sgml_open_tag_exact("FOO"), "<FOO>", ());
+    }
+
+    #[test]
+    fn sgml_open_tag_exact__different_tag__match() {
+        assert_not_consumed(sgml_open_tag_exact("FOO"), "<BAR>");
+    }
+
+    #[test]
+    fn sgml_close_tag__valid_tag__match() {
+        assert_consumed_eq(sgml_close_tag("FOO"), "</FOO>", ());
+    }
+
+    #[test]
+    fn sgml_close_tag__valid_tag_with_leading_whitespace__match() {
+        assert_consumed_eq(sgml_close_tag("FOO"), " \t\n</FOO>", ());
+    }
+
+    #[test]
+    fn sgml_close_tag__different_tag__no_match() {
+        assert_not_consumed(sgml_close_tag("FOO"), "</BAR>");
+    }
+
+    #[test]
     fn none__none_input__match() {
         assert_consumed(none, "NONE");
     }
@@ -257,6 +429,16 @@ mod tests {
     #[test]
     fn none__other_input__no_match() {
         assert_not_consumed(none, "NONO");
+    }
+
+    #[test]
+    fn whitespace__multiple_whitespace_chars__match() {
+        assert_consumed(whitespace, " \t \r\n");
+    }
+
+    #[test]
+    fn whitespace__not_whitespace__empty_match() {
+        assert_eq!(whitespace("foo"), Ok(("foo", "")));
     }
 
     #[test]
@@ -272,5 +454,28 @@ mod tests {
     #[test]
     fn unsigned_integer__negative__no_match() {
         assert_not_consumed(unsigned_integer, "-123");
+    }
+
+    #[test]
+    fn is_uppercase__capital_a__returns_true() {
+        assert!(is_uppercase('A'));
+    }
+
+    #[test]
+    fn is_uppercase__lowercase_a__returns_false() {
+        assert!(!is_uppercase('a'));
+    }
+
+    #[test]
+    fn is_whitespace__whitespace_char__returns_true() {
+        let chars = ['\t', '\r', '\n', ' '];
+        for c in &chars {
+            assert!(is_whitespace(*c));
+        }
+    }
+
+    #[test]
+    fn is_whitespace__letter_char__returns_false() {
+        assert!(!is_whitespace('a'));
     }
 }
