@@ -3,6 +3,7 @@ use chrono::{DateTime, FixedOffset};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Ofx {
     pub headers: Vec<HeaderEntry>,
+    //pub message_set_aggregates: Vec<MessageSetAggregate>,
 }
 
 /// OFX Section 2.4.5

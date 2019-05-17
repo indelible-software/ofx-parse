@@ -1,0 +1,3 @@
+pub enum OfxError {
+    ParseError,
+}

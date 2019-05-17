@@ -1,21 +1,26 @@
+mod sgml;
+
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while, take_while1},
+    bytes::complete::{tag, take_while},
     character::complete::{alphanumeric1, char, digit1, line_ending, not_line_ending},
     combinator::map,
-    multi::{many0, separated_list},
-    sequence::{delimited, pair, preceded, terminated},
+    multi::separated_list,
+    sequence::pair,
     IResult,
 };
 
 use crate::{
     model::{Charset, Data, Encoding, HeaderEntry, Ofx, Security},
-    parsers::sgml::sgml_open_tag,
+    read::v1::sgml::{sgml_close_tag, sgml_open_tag},
 };
 
 pub fn ofx(i: &str) -> IResult<&str, Ofx> {
     let (i, headers) = v1_header(i)?;
-    let (i, _) = sgml_open_tag(tag("OFX"))(i)?;
+    let (i, root_tag) = sgml_open_tag(i)?;
+    if root_tag != "OFX" { /* TODO */ }
+    // TODO
+    let (i, _) = sgml_close_tag("OFX")(i)?;
     Ok((i, Ofx { headers }))
 }
 
